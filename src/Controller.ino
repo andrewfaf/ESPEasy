@@ -24,7 +24,8 @@ void sendData(struct EventStruct *event)
       uint16_t delayms = Settings.MessageDelay - dif;
       //this is logged nowhere else, so might as well disable it here also:
       // addLog(LOG_LEVEL_DEBUG_MORE, String(F("CTRL : Message delay (ms): "))+delayms);
-      delayBackground(delayms);
+
+     delayBackground(delayms);
 
       // unsigned long timer = millis() + delayms;
       // while (!timeOutReached(timer))
@@ -38,11 +39,19 @@ void sendData(struct EventStruct *event)
   {
     event->ControllerIndex = x;
     event->idx = Settings.TaskDeviceID[x][event->TaskIndex];
-
-    if (Settings.TaskDeviceSendData[event->ControllerIndex][event->TaskIndex] && Settings.ControllerEnabled[event->ControllerIndex] && Settings.Protocol[event->ControllerIndex])
+    if (Settings.TaskDeviceSendData[event->ControllerIndex][event->TaskIndex] &&
+        Settings.ControllerEnabled[event->ControllerIndex] && Settings.Protocol[event->ControllerIndex])
     {
       event->ProtocolIndex = getProtocolIndex(Settings.Protocol[event->ControllerIndex]);
-      CPlugin_ptr[event->ProtocolIndex](CPLUGIN_PROTOCOL_SEND, event, dummyString);
+      if (validUserVar(event)) {
+        CPlugin_ptr[event->ProtocolIndex](CPLUGIN_PROTOCOL_SEND, event, dummyString);
+      } else {
+        String log = F("Invalid value detected for controller ");
+        String controllerName;
+        CPlugin_ptr[event->ProtocolIndex](CPLUGIN_GET_DEVICENAME, event, controllerName);
+        log += controllerName;
+        addLog(LOG_LEVEL_DEBUG, log);
+      }
     }
   }
 
@@ -50,6 +59,17 @@ void sendData(struct EventStruct *event)
   lastSend = millis();
 }
 
+boolean validUserVar(struct EventStruct *event) {
+  for (int i = 0; i < VARS_PER_TASK; ++i) {
+    const float f(UserVar[event->BaseVarIndex + i]);
+    if (f == NAN)      return false; //("NaN");
+    if (f == INFINITY) return false; //("INFINITY");
+    if (-f == INFINITY)return false; //("-INFINITY");
+    if (isnan(f))      return false; //("isnan");
+    if (isinf(f))      return false; //("isinf");
+  }
+  return true;
+}
 
 /*********************************************************************************************\
  * Handle incoming MQTT messages
@@ -64,6 +84,7 @@ void callback(char* c_topic, byte* b_payload, unsigned int length) {
   if (length>sizeof(c_payload)-1)
   {
     addLog(LOG_LEVEL_ERROR, F("MQTT : Ignored too big message"));
+    return;
   }
 
   //convert payload to string, and 0 terminate
